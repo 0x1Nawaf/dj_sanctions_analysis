@@ -1,20 +1,11 @@
 from dj_sanctions.parsers.helpers import text_or_none
 
 
-def parse_records(root):
-    records_el = root.find("Records")
+def parse_single_record(rec):
+    rid = int(rec.attrib["id"])
 
-    tbl = {
-        "record": [], "record_name": [], "record_description": [],
-        "record_role": [], "record_date": [], "record_birth_place": [],
-        "record_sanctions_ref": [], "record_country": [], "record_id_number": [],
-        "record_source": [], "record_image": [], "record_address": [],
-    }
-
-    for rec in records_el:
-        rid = int(rec.attrib["id"])
-
-        tbl["record"].append({
+    result = {
+        "record": {
             "id": rid,
             "record_type": rec.tag,
             "action": rec.attrib.get("action"),
@@ -23,21 +14,21 @@ def parse_records(root):
             "active_status": text_or_none(rec, "ActiveStatus"),
             "deceased": text_or_none(rec, "Deceased"),
             "profile_notes": text_or_none(rec, "ProfileNotes"),
-        })
+        },
+        "record_name": _parse_names(rec, rid),
+        "record_description": _parse_descriptions(rec, rid),
+        "record_role": _parse_roles(rec, rid),
+        "record_date": _parse_dates(rec, rid),
+        "record_birth_place": _parse_birth_places(rec, rid),
+        "record_sanctions_ref": _parse_sanctions_references(rec, rid),
+        "record_country": _parse_countries_detail(rec, rid),
+        "record_id_number": _parse_id_numbers(rec, rid),
+        "record_source": _parse_sources(rec, rid),
+        "record_image": _parse_images(rec, rid),
+        "record_address": _parse_addresses(rec, rid),
+    }
 
-        tbl["record_name"].extend(_parse_names(rec, rid))
-        tbl["record_description"].extend(_parse_descriptions(rec, rid))
-        tbl["record_role"].extend(_parse_roles(rec, rid))
-        tbl["record_date"].extend(_parse_dates(rec, rid))
-        tbl["record_birth_place"].extend(_parse_birth_places(rec, rid))
-        tbl["record_sanctions_ref"].extend(_parse_sanctions_references(rec, rid))
-        tbl["record_country"].extend(_parse_countries_detail(rec, rid))
-        tbl["record_id_number"].extend(_parse_id_numbers(rec, rid))
-        tbl["record_source"].extend(_parse_sources(rec, rid))
-        tbl["record_image"].extend(_parse_images(rec, rid))
-        tbl["record_address"].extend(_parse_addresses(rec, rid))
-
-    return tbl
+    return result
 
 
 def _parse_names(rec, rid):

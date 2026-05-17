@@ -1,6 +1,5 @@
 import argparse
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from dj_sanctions.api import (
@@ -8,10 +7,10 @@ from dj_sanctions.api import (
     download_file,
     classify_files,
     extract_date_from_filename,
-    extract_xml_from_zip,
+    extract_xml_from_zip_to_disk,
 )
-from dj_sanctions.parsers import transform_xml_to_dict
-from dj_sanctions.merger import merge_delta_into
+from dj_sanctions.parsers.transform import transform_xml_file_to_dict, transform_xml_file_to_jsonl
+from dj_sanctions.streaming import merge_jsonl_with_deltas
 from dj_sanctions.writer import write_json
 
 
@@ -23,20 +22,11 @@ def _save_zip(data, filename, data_dir):
     return path
 
 
-def _extract_and_parse(zip_path):
-    with open(zip_path, "rb") as f:
-        zip_bytes = f.read()
-
+def _extract_xml(zip_path, xml_dir):
     filename = zip_path.name
     if filename.lower().endswith(".zip"):
-        xml_name, xml_content = extract_xml_from_zip(zip_bytes)
-    else:
-        xml_name = filename
-        xml_content = zip_bytes.decode("utf-8")
-
-    print("  Parsing %s ..." % xml_name)
-    root = ET.fromstring(xml_content)
-    return transform_xml_to_dict(root)
+        return extract_xml_from_zip_to_disk(zip_path, xml_dir)
+    return zip_path
 
 
 def _run_local(args):
@@ -49,8 +39,7 @@ def _run_local(args):
     outdir.mkdir(parents=True, exist_ok=True)
 
     print("Parsing %s ..." % xml_path)
-    root = ET.parse(str(xml_path)).getroot()
-    output = transform_xml_to_dict(root)
+    output = transform_xml_file_to_dict(xml_path)
 
     out_path = outdir / "sanctions_seeder.json"
     write_json(output, out_path)
@@ -117,7 +106,11 @@ def _run_daily(args):
 
 def _download_extract_merge(all_files, auth_b64, outdir):
     data_dir = outdir / "pfa_data"
+    xml_dir = outdir / "pfa_data" / "xml"
+    jsonl_dir = outdir / "pfa_data" / "jsonl"
     data_dir.mkdir(parents=True, exist_ok=True)
+    xml_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_dir.mkdir(parents=True, exist_ok=True)
 
     sep = "=" * 60
     total = len(all_files)
@@ -133,31 +126,49 @@ def _download_extract_merge(all_files, auth_b64, outdir):
             print("[%d/%d] Already exists: %s" % (i, total, existing))
             saved_paths.append(existing)
             continue
-
         print("[%d/%d] %s" % (i, total, filename))
         raw_data = download_file(filename, auth_b64)
         path = _save_zip(raw_data, filename, data_dir)
         saved_paths.append(path)
 
     print("\n%s" % sep)
-    print("  Phase 2: Extracting and parsing %d file(s)" % total)
+    print("  Phase 2: Parsing base file (streaming to JSONL)")
     print("%s\n" % sep)
 
     print("[1/%d] Base: %s" % (total, saved_paths[0].name))
-    merged = _extract_and_parse(saved_paths[0])
+    base_xml = _extract_xml(saved_paths[0], xml_dir)
+    transform_xml_file_to_jsonl(base_xml, jsonl_dir)
 
-    for i, path in enumerate(saved_paths[1:], start=2):
-        print("\n[%d/%d] Delta: %s" % (i, total, path.name))
-        delta = _extract_and_parse(path)
-        merge_delta_into(merged, delta)
+    delta_dicts = []
+    if total > 1:
+        print("\n%s" % sep)
+        print("  Phase 3: Parsing %d delta file(s) (in memory)" % (total - 1))
+        print("%s\n" % sep)
 
-    rec_count = len(merged.get("record", []))
+        for i, path in enumerate(saved_paths[1:], start=2):
+            print("[%d/%d] Delta: %s" % (i, total, path.name))
+            delta_xml = _extract_xml(path, xml_dir)
+            delta = transform_xml_file_to_dict(delta_xml)
+            delta_dicts.append(delta)
+
     print("\n%s" % sep)
-    print("  Merge complete: %d records from %d file(s)" % (rec_count, total))
+    print("  Phase 4: Merging and writing final JSON")
     print("%s\n" % sep)
 
     out_path = outdir / "sanctions_seeder.json"
-    write_json(merged, out_path)
+    merge_jsonl_with_deltas(jsonl_dir, delta_dicts, out_path)
+
+    rec_line_count = 0
+    rec_jsonl = jsonl_dir / "record.jsonl"
+    if rec_jsonl.exists():
+        with open(rec_jsonl) as f:
+            for _ in f:
+                rec_line_count += 1
+
+    print("\n%s" % sep)
+    print("  Complete: ~%d base records from %d file(s)" % (rec_line_count, total))
+    print("  Output: %s" % out_path)
+    print("%s" % sep)
 
 
 def main():

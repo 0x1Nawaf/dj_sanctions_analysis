@@ -41,25 +41,6 @@ Output is always `sanctions_seeder.json` in the output directory.
 7. Deltas are merged: `add`/`chg` records replace existing ones, `del` records are removed
 8. The merged result is written as `sanctions_seeder.json`
 
-## Project structure
-
-```
-dj_sanctions/
-├── __main__.py         # python -m entrypoint
-├── cli.py              # CLI argument parsing and mode orchestration
-├── config.py           # Constants (DJ URL, timeouts)
-├── merger.py           # Delta merge logic
-├── writer.py           # JSON output
-├── api/
-│   ├── client.py       # HTTP: list files, download with progress, classify
-│   └── archive.py      # Zip extraction
-└── parsers/
-    ├── helpers.py       # XML helpers
-    ├── references.py    # Reference/lookup table parsers
-    ├── records.py       # Person/Entity record parsers
-    ├── associations.py  # Association parsers
-    └── transform.py     # XML root -> dict orchestrator
-```
 
 ## Output JSON structure
 
