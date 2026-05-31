@@ -4,7 +4,7 @@ from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-from dj_sanctions.config import DJ_BASE_URL, DOWNLOAD_TIMEOUT, DOWNLOAD_CHUNK_SIZE
+from dj_sanctions_analysis.config import DJ_BASE_URL, DOWNLOAD_TIMEOUT, DOWNLOAD_CHUNK_SIZE
 
 
 class _LinkParser(HTMLParser):

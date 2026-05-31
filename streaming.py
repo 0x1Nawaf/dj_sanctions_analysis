@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from dj_sanctions.config import CHILD_TABLES
+from dj_sanctions_analysis.config import CHILD_TABLES
 
 
 def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path):

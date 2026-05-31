@@ -1,3 +1,3 @@
-from dj_sanctions.cli import main
+from dj_sanctions_analysis.cli import main
 
 main()

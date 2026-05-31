@@ -10,19 +10,22 @@ Python 3.8+ (no external dependencies).
 
 ```bash
 # Full sync: downloads the latest full snapshot + all daily deltas after it, merges into one file
-python3 -m dj_sanctions --auth <base64_credentials> --full
+python3 -m dj_sanctions_analysis --auth <base64_credentials> --full
 
 # Daily only: downloads only daily/incremental delta files, merges them
-python3 -m dj_sanctions --auth <base64_credentials> --daily
+python3 -m dj_sanctions_analysis --auth <base64_credentials> --daily
+
+# Today only: downloads and parses today's file(s), falls back to yesterday if none found
+python3 -m dj_sanctions_analysis --auth <base64_credentials> --today
 
 # List available files on the DJ feed
-python3 -m dj_sanctions --auth <base64_credentials> --list
+python3 -m dj_sanctions_analysis --auth <base64_credentials> --list
 
 # Parse a local XML file
-python3 -m dj_sanctions --local /path/to/PFA2_file.xml
+python3 -m dj_sanctions_analysis --local /path/to/PFA2_file.xml
 
 # Specify output directory
-python3 -m dj_sanctions --auth <base64_credentials> --full --outdir /path/to/output
+python3 -m dj_sanctions_analysis --auth <base64_credentials> --full --outdir /path/to/output
 ```
 
 Output is always `sanctions_seeder.json` in the output directory.
@@ -38,7 +41,8 @@ Output is always `sanctions_seeder.json` in the output directory.
 4. **Phase 2 -- Extract & Merge**: each zip is extracted and parsed from disk, then deltas are applied on top of the base.
 5. **`--full` mode**: picks the latest full file as base, then applies all deltas dated after it
 6. **`--daily` mode**: downloads only daily + incremental files and merges them sequentially
-7. Deltas are merged: `add`/`chg` records replace existing ones, `del` records are removed
+7. **`--today` mode**: filters files by today's date (falls back to yesterday if none found) and downloads/parses them
+8. Deltas are merged: `add`/`chg` records replace existing ones, `del` records are removed
 8. The merged result is written as `sanctions_seeder.json`
 
 

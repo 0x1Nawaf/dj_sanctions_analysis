@@ -2,9 +2,9 @@ import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from dj_sanctions.parsers.references import TAG_TO_KEY, parse_single_reference
-from dj_sanctions.parsers.records import parse_single_record
-from dj_sanctions.parsers.associations import parse_association_group
+from dj_sanctions_analysis.parsers.references import TAG_TO_KEY, parse_single_reference
+from dj_sanctions_analysis.parsers.records import parse_single_record
+from dj_sanctions_analysis.parsers.associations import parse_association_group
 
 REFERENCE_TAGS = frozenset(TAG_TO_KEY.keys())
 RECORD_TAGS = frozenset(("Person", "Entity"))

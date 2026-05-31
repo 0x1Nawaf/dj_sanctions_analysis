@@ -1,17 +1,18 @@
 import argparse
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
-from dj_sanctions.api import (
+from dj_sanctions_analysis.api import (
     list_remote_files,
     download_file,
     classify_files,
     extract_date_from_filename,
     extract_xml_from_zip_to_disk,
 )
-from dj_sanctions.parsers.transform import transform_xml_file_to_dict, transform_xml_file_to_jsonl
-from dj_sanctions.streaming import merge_jsonl_with_deltas
-from dj_sanctions.writer import write_json
+from dj_sanctions_analysis.parsers.transform import transform_xml_file_to_dict, transform_xml_file_to_jsonl
+from dj_sanctions_analysis.streaming import merge_jsonl_with_deltas
+from dj_sanctions_analysis.writer import write_json
 
 
 def _save_zip(data, filename, data_dir):
@@ -104,6 +105,51 @@ def _run_daily(args):
     _download_extract_merge(all_files, args.auth, outdir)
 
 
+def _run_today(args):
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    files = list_remote_files(args.auth)
+    classified = classify_files(files)
+
+    today_str = date.today().strftime("%Y%m%d")
+    yesterday_str = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+
+    all_candidates = sorted(
+        classified["full"] + classified["daily"] + classified["incremental"],
+        key=extract_date_from_filename,
+    )
+
+    today_files = [
+        f for f in all_candidates
+        if extract_date_from_filename(f).startswith(today_str)
+    ]
+
+    if today_files:
+        target_date = today_str
+        target_files = today_files
+    else:
+        target_files = [
+            f for f in all_candidates
+            if extract_date_from_filename(f).startswith(yesterday_str)
+        ]
+        target_date = yesterday_str
+
+    if not target_files:
+        print(
+            "No files found for today (%s) or yesterday (%s) on the DJ feed."
+            % (today_str, yesterday_str),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print("\nFound %d file(s) for %s:" % (len(target_files), target_date))
+    for f in target_files:
+        print("  %s" % f)
+
+    _download_extract_merge(target_files, args.auth, outdir)
+
+
 def _download_extract_merge(all_files, auth_b64, outdir):
     data_dir = outdir / "pfa_data"
     xml_dir = outdir / "pfa_data" / "xml"
@@ -173,7 +219,7 @@ def _download_extract_merge(all_files, auth_b64, outdir):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="dj_sanctions",
+        prog="dj_sanctions_analysis",
         description="Download and parse Dow Jones PFA sanctions XML into normalized JSON.",
     )
 
@@ -185,6 +231,7 @@ def main():
     mode.add_argument("--list", action="store_true", help="List available files and exit")
     mode.add_argument("--full", action="store_true", help="Download latest full snapshot + all deltas after it")
     mode.add_argument("--daily", action="store_true", help="Download only daily/incremental files (no full snapshot)")
+    mode.add_argument("--today", action="store_true", help="Download and parse today's file(s), falls back to yesterday if none found")
 
     parser.add_argument("--outdir", metavar="DIR", default=".", help="Output directory (default: current dir)")
 
@@ -194,6 +241,8 @@ def main():
         _run_local(args)
     elif args.list:
         _run_list(args)
+    elif args.today:
+        _run_today(args)
     elif args.daily:
         _run_daily(args)
     else:

@@ -1,4 +1,4 @@
-from dj_sanctions.config import CHILD_TABLES
+from dj_sanctions_analysis.config import CHILD_TABLES
 
 
 def merge_delta_into(base, delta):

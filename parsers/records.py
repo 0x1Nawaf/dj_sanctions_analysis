@@ -1,4 +1,4 @@
-from dj_sanctions.parsers.helpers import text_or_none
+from dj_sanctions_analysis.parsers.helpers import text_or_none
 
 
 def parse_single_record(rec):

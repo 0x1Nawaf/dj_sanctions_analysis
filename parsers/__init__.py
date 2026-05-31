@@ -1,1 +1,1 @@
-from dj_sanctions.parsers.transform import transform_xml_file_to_dict, transform_xml_file_to_jsonl
+from dj_sanctions_analysis.parsers.transform import transform_xml_file_to_dict, transform_xml_file_to_jsonl
