@@ -1,4 +1,4 @@
-# DJ Sanctions
+# DJ Sanctions Analysis
 
 Downloads Dow Jones PFA sanctions XML files, parses them, and produces a single `sanctions_seeder.json` ready for database import.
 
