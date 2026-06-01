@@ -116,7 +116,7 @@ def _run_today(args):
     yesterday_str = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
 
     all_candidates = sorted(
-        classified["full"] + classified["daily"] + classified["incremental"],
+        classified["daily"] + classified["incremental"],
         key=extract_date_from_filename,
     )
 
