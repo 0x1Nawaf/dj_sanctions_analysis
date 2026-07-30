@@ -4,7 +4,7 @@ from pathlib import Path
 from dj_sanctions_analysis.config import CHILD_TABLES
 
 
-def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path):
+def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path, feed_scope="complete"):
     tmp_dir = Path(tmp_dir)
     out_path = Path(out_path)
 
@@ -54,6 +54,11 @@ def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path):
         latest_meta = delta_list[-1].get("_meta", {})
         if latest_meta:
             meta = latest_meta
+
+    meta["feed_scope"] = feed_scope
+    record_count = _count_merged_records(tmp_dir, affected_ids, replaced_records)
+    if record_count:
+        meta["record_count"] = record_count
 
     jsonl_files = sorted(tmp_dir.glob("*.jsonl"))
     table_keys = [f.stem for f in jsonl_files]
@@ -130,4 +135,23 @@ def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path):
         out.write("\n}\n")
 
     size_mb = out_path.stat().st_size / (1024 * 1024)
-    print("  Done. File size: %.1f MB" % size_mb)
+    print("  Done. %d records. File size: %.1f MB" % (record_count, size_mb))
+    return record_count
+
+
+def _count_merged_records(tmp_dir, affected_ids, replaced_records):
+    count = 0
+    rec_path = tmp_dir / "record.jsonl"
+    if rec_path.exists():
+        with open(rec_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if affected_ids:
+                    row = json.loads(line)
+                    if row.get("id") in affected_ids:
+                        continue
+                count += 1
+    count += len(replaced_records)
+    return count

@@ -41,6 +41,9 @@ def _run_local(args):
 
     print("Parsing %s ..." % xml_path)
     output = transform_xml_file_to_dict(xml_path)
+    meta = output.setdefault("_meta", {})
+    meta["feed_scope"] = "complete"
+    meta["record_count"] = len(output.get("record", []))
 
     out_path = outdir / "sanctions_seeder.json"
     write_json(output, out_path)
@@ -62,52 +65,86 @@ def _run_list(args):
         print("    %s" % f)
 
 
-def _run_full(args):
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+def _resolve_full_base(classified, data_dir, auth_b64):
+    """Ensure the latest full snapshot zip is available locally."""
+    data_dir.mkdir(parents=True, exist_ok=True)
 
-    files = list_remote_files(args.auth)
-    classified = classify_files(files)
+    if classified["full"]:
+        latest_full = classified["full"][-1]
+        path = data_dir / latest_full
+        if not path.exists():
+            raw_data = download_file(latest_full, auth_b64)
+            path = _save_zip(raw_data, latest_full, data_dir)
+        return path
 
-    if not classified["full"]:
-        print("No full (_f) file found on the DJ feed.", file=sys.stderr)
-        sys.exit(1)
+    cached = sorted(data_dir.glob("*_f.zip"))
+    if cached:
+        print(
+            "WARN: No full file on remote feed; using cached %s"
+            % cached[-1].name,
+            file=sys.stderr,
+        )
+        return cached[-1]
 
-    latest_full = classified["full"][-1]
-    full_date = extract_date_from_filename(latest_full)
+    print(
+        "No full snapshot (_f.zip) found on the DJ feed or in %s."
+        % data_dir,
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
+
+def _deltas_after_full(classified, full_date):
     all_deltas = sorted(
         classified["daily"] + classified["incremental"],
         key=extract_date_from_filename,
     )
-    deltas_after_full = [f for f in all_deltas if extract_date_from_filename(f) > full_date]
-    all_files = [latest_full] + deltas_after_full
+    return [f for f in all_deltas if extract_date_from_filename(f) > full_date]
 
-    _download_extract_merge(all_files, args.auth, outdir)
+
+def _run_full(args):
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    data_dir = outdir / "pfa_data"
+
+    files = list_remote_files(args.auth)
+    classified = classify_files(files)
+
+    full_base = _resolve_full_base(classified, data_dir, args.auth)
+    full_date = extract_date_from_filename(full_base.name)
+    all_files = [full_base.name] + _deltas_after_full(classified, full_date)
+
+    _download_extract_merge(all_files, args.auth, outdir, feed_scope="complete")
 
 
 def _run_daily(args):
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    data_dir = outdir / "pfa_data"
 
     files = list_remote_files(args.auth)
     classified = classify_files(files)
 
-    all_files = sorted(
-        classified["daily"] + classified["incremental"],
-        key=extract_date_from_filename,
-    )
+    full_base = _resolve_full_base(classified, data_dir, args.auth)
+    full_date = extract_date_from_filename(full_base.name)
+    delta_files = _deltas_after_full(classified, full_date)
 
-    if not all_files:
-        print("No daily/incremental files found on the DJ feed.", file=sys.stderr)
+    if not delta_files:
+        print(
+            "No daily/incremental files found after full snapshot %s."
+            % full_base.name,
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    _download_extract_merge(all_files, args.auth, outdir)
+    all_files = [full_base.name] + delta_files
+    _download_extract_merge(all_files, args.auth, outdir, feed_scope="complete")
 
 
 def _run_today(args):
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    data_dir = outdir / "pfa_data"
 
     files = list_remote_files(args.auth)
     classified = classify_files(files)
@@ -143,14 +180,18 @@ def _run_today(args):
         )
         sys.exit(1)
 
-    print("\nFound %d file(s) for %s:" % (len(target_files), target_date))
+    full_base = _resolve_full_base(classified, data_dir, args.auth)
+
+    print("\nFound %d delta file(s) for %s:" % (len(target_files), target_date))
     for f in target_files:
         print("  %s" % f)
+    print("Using full base: %s" % full_base.name)
 
-    _download_extract_merge(target_files, args.auth, outdir)
+    all_files = [full_base.name] + target_files
+    _download_extract_merge(all_files, args.auth, outdir, feed_scope="complete")
 
 
-def _download_extract_merge(all_files, auth_b64, outdir):
+def _download_extract_merge(all_files, auth_b64, outdir, feed_scope="complete"):
     data_dir = outdir / "pfa_data"
     xml_dir = outdir / "pfa_data" / "xml"
     jsonl_dir = outdir / "pfa_data" / "jsonl"
@@ -202,17 +243,13 @@ def _download_extract_merge(all_files, auth_b64, outdir):
     print("%s\n" % sep)
 
     out_path = outdir / "sanctions_seeder.json"
-    merge_jsonl_with_deltas(jsonl_dir, delta_dicts, out_path)
-
-    rec_line_count = 0
-    rec_jsonl = jsonl_dir / "record.jsonl"
-    if rec_jsonl.exists():
-        with open(rec_jsonl) as f:
-            for _ in f:
-                rec_line_count += 1
+    record_count = merge_jsonl_with_deltas(jsonl_dir, delta_dicts, out_path, feed_scope=feed_scope)
 
     print("\n%s" % sep)
-    print("  Complete: ~%d base records from %d file(s)" % (rec_line_count, total))
+    print(
+        "  Complete: %d records merged from %d file(s) (feed_scope=%s)"
+        % (record_count, total, feed_scope)
+    )
     print("  Output: %s" % out_path)
     print("%s" % sep)
 
@@ -230,8 +267,16 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--list", action="store_true", help="List available files and exit")
     mode.add_argument("--full", action="store_true", help="Download latest full snapshot + all deltas after it")
-    mode.add_argument("--daily", action="store_true", help="Download only daily/incremental files (no full snapshot)")
-    mode.add_argument("--today", action="store_true", help="Download and parse today's file(s), falls back to yesterday if none found")
+    mode.add_argument(
+        "--daily",
+        action="store_true",
+        help="Download latest full snapshot and apply all daily/incremental deltas (complete feed for seeder)",
+    )
+    mode.add_argument(
+        "--today",
+        action="store_true",
+        help="Download latest full snapshot and apply today's delta(s) only (complete feed for seeder)",
+    )
 
     parser.add_argument("--outdir", metavar="DIR", default=".", help="Output directory (default: current dir)")
 
