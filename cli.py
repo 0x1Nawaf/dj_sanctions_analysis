@@ -96,7 +96,8 @@ def _resolve_full_base(classified, data_dir, auth_b64):
 
 def _deltas_after_full(classified, full_date):
     all_deltas = sorted(
-        classified["daily"] + classified["incremental"],
+        #classified["daily"] + classified["incremental"],
+        classified["daily"],
         key=extract_date_from_filename,
     )
     return [f for f in all_deltas if extract_date_from_filename(f) > full_date]
