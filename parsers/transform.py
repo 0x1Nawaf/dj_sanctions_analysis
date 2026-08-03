@@ -69,6 +69,14 @@ def transform_xml_file_to_jsonl(xml_path, tmp_dir):
     tmp_dir = Path(tmp_dir)
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
+    # Rebuild from scratch: a previous run in a different mode may have left
+    # tables this file does not produce, and the merge step globs *.jsonl.
+    for stale in list(tmp_dir.glob("*.jsonl")) + [tmp_dir / "_meta.json"]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
     handles = {}
     counters = {}
 

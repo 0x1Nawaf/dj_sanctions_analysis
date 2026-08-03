@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from dj_sanctions_analysis.config import CHILD_TABLES
@@ -65,74 +66,89 @@ def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path, feed_scope="complete"
 
     print("  Writing %s (streaming) ..." % out_path)
 
-    with open(out_path, "w", encoding="utf-8") as out:
-        out.write("{\n")
-        out.write('  "_meta": %s' % json.dumps(meta, ensure_ascii=False))
+    # Written to a .part file so a run that dies here (out of disk, killed)
+    # cannot leave a half-written seeder JSON for the Go seeder to consume.
+    part_path = out_path.with_name(out_path.name + ".part")
 
-        for table_key in table_keys:
-            out.write(",\n")
-            out.write('  "%s": [\n' % table_key)
+    try:
+        with open(part_path, "w", encoding="utf-8") as out:
+            out.write("{\n")
+            out.write('  "_meta": %s' % json.dumps(meta, ensure_ascii=False))
 
-            jsonl_path = tmp_dir / (table_key + ".jsonl")
-            first = True
-            base_count = 0
-            skip_count = 0
+            for table_key in table_keys:
+                out.write(",\n")
+                out.write('  "%s": [\n' % table_key)
 
-            with open(jsonl_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
+                jsonl_path = tmp_dir / (table_key + ".jsonl")
+                first = True
+                base_count = 0
+                skip_count = 0
 
-                    if affected_ids:
-                        row = json.loads(line)
-                        rid = row.get("id") if table_key == "record" else row.get("record_id")
-                        if rid is not None and rid in affected_ids:
-                            skip_count += 1
+                with open(jsonl_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
                             continue
 
-                    if not first:
-                        out.write(",\n")
-                    out.write("    " + line)
-                    first = False
-                    base_count += 1
+                        if affected_ids:
+                            row = json.loads(line)
+                            rid = row.get("id") if table_key == "record" else row.get("record_id")
+                            if rid is not None and rid in affected_ids:
+                                skip_count += 1
+                                continue
 
-            append_count = 0
-
-            if table_key == "record":
-                for rec in replaced_records.values():
-                    if not first:
-                        out.write(",\n")
-                    out.write("    " + json.dumps(rec, ensure_ascii=False))
-                    first = False
-                    append_count += 1
-            elif table_key == "association":
-                for rows in replaced_assocs.values():
-                    for row in rows:
                         if not first:
                             out.write(",\n")
-                        out.write("    " + json.dumps(row, ensure_ascii=False))
+                        out.write("    " + line)
                         first = False
-                        append_count += 1
-            elif table_key in replaced_children:
-                for rows in replaced_children[table_key].values():
-                    for row in rows:
+                        base_count += 1
+
+                append_count = 0
+
+                if table_key == "record":
+                    for rec in replaced_records.values():
                         if not first:
                             out.write(",\n")
-                        out.write("    " + json.dumps(row, ensure_ascii=False))
+                        out.write("    " + json.dumps(rec, ensure_ascii=False))
                         first = False
                         append_count += 1
+                elif table_key == "association":
+                    for rows in replaced_assocs.values():
+                        for row in rows:
+                            if not first:
+                                out.write(",\n")
+                            out.write("    " + json.dumps(row, ensure_ascii=False))
+                            first = False
+                            append_count += 1
+                elif table_key in replaced_children:
+                    for rows in replaced_children[table_key].values():
+                        for row in rows:
+                            if not first:
+                                out.write(",\n")
+                            out.write("    " + json.dumps(row, ensure_ascii=False))
+                            first = False
+                            append_count += 1
 
-            out.write("\n  ]")
+                out.write("\n  ]")
 
-            total = base_count + append_count
-            if skip_count or append_count:
-                print("    %s: %d rows (kept %d, skipped %d, added %d)" % (
-                    table_key, total, base_count, skip_count, append_count))
-            else:
-                print("    %s: %d rows" % (table_key, total))
+                total = base_count + append_count
+                if skip_count or append_count:
+                    print("    %s: %d rows (kept %d, skipped %d, added %d)" % (
+                        table_key, total, base_count, skip_count, append_count))
+                else:
+                    print("    %s: %d rows" % (table_key, total))
 
-        out.write("\n}\n")
+            out.write("\n}\n")
+            out.flush()
+            os.fsync(out.fileno())
+    except BaseException:
+        try:
+            part_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    part_path.replace(out_path)
 
     size_mb = out_path.stat().st_size / (1024 * 1024)
     print("  Done. %d records. File size: %.1f MB" % (record_count, size_mb))
