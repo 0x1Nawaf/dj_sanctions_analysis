@@ -11,6 +11,11 @@ from dj_sanctions_analysis.api import (
     extract_date_from_filename,
     extract_xml_from_zip_to_disk,
 )
+from dj_sanctions_analysis.config import (
+    FEED_SCOPE_COMPLETE,
+    FEED_SCOPE_DELTA,
+    feed_scope_from_pfa_type,
+)
 from dj_sanctions_analysis.parsers.transform import transform_xml_file_to_dict, transform_xml_file_to_jsonl
 from dj_sanctions_analysis.streaming import merge_jsonl_with_deltas
 from dj_sanctions_analysis.writer import write_json
@@ -49,8 +54,22 @@ def _run_local(args):
     print("Parsing %s ..." % xml_path)
     output = transform_xml_file_to_dict(xml_path)
     meta = output.setdefault("_meta", {})
-    meta["feed_scope"] = "complete"
+
+    derived = feed_scope_from_pfa_type(meta.get("type"))
+    if args.feed_scope == "auto":
+        feed_scope = derived
+    else:
+        feed_scope = args.feed_scope
+        if feed_scope != derived:
+            print(
+                "  WARN: --feed-scope %s overrides %s derived from PFA type=%r"
+                % (feed_scope, derived, meta.get("type")),
+                file=sys.stderr,
+            )
+
+    meta["feed_scope"] = feed_scope
     meta["record_count"] = len(output.get("record", []))
+    print("  feed_scope=%s (PFA type=%r)" % (feed_scope, meta.get("type")))
 
     out_path = outdir / "sanctions_seeder.json"
     write_json(output, out_path)
@@ -175,7 +194,7 @@ def _run_today(args):
     _download_extract_merge(target_files, args.auth, outdir, feed_scope="delta_only")
 
 
-def _download_extract_merge(all_files, auth_b64, outdir, feed_scope="complete"):
+def _download_extract_merge(all_files, auth_b64, outdir, feed_scope):
     data_dir = outdir / "pfa_data"
     xml_dir = outdir / "pfa_data" / "xml"
     jsonl_dir = outdir / "pfa_data" / "jsonl"
@@ -204,7 +223,21 @@ def _download_extract_merge(all_files, auth_b64, outdir, feed_scope="complete"):
 
     print("[1/%d] Base: %s" % (total, saved_paths[0].name))
     base_xml = _extract_xml(saved_paths[0], xml_dir)
-    transform_xml_file_to_jsonl(base_xml, jsonl_dir)
+    base_meta = transform_xml_file_to_jsonl(base_xml, jsonl_dir)
+
+    # The filename convention picked the mode, but the file itself is the
+    # authority. Publishing a delta as complete makes the seeder inactivate
+    # every record missing from it.
+    derived_scope = feed_scope_from_pfa_type(base_meta.get("type"))
+    if feed_scope == FEED_SCOPE_COMPLETE and derived_scope != FEED_SCOPE_COMPLETE:
+        print(
+            "\nWARN: %s declares PFA type=%r, which is not a full snapshot.\n"
+            "      Downgrading feed_scope from %s to %s so the seeder will not\n"
+            "      inactivate records absent from this file."
+            % (saved_paths[0].name, base_meta.get("type"), feed_scope, derived_scope),
+            file=sys.stderr,
+        )
+        feed_scope = derived_scope
 
     delta_dicts = []
     if total > 1:
@@ -223,7 +256,9 @@ def _download_extract_merge(all_files, auth_b64, outdir, feed_scope="complete"):
     print("%s\n" % sep)
 
     out_path = outdir / "sanctions_seeder.json"
-    record_count = merge_jsonl_with_deltas(jsonl_dir, delta_dicts, out_path, feed_scope=feed_scope)
+    record_count = merge_jsonl_with_deltas(
+        jsonl_dir, delta_dicts, out_path, feed_scope=feed_scope
+    )
 
     print("\n%s" % sep)
     print(
@@ -263,6 +298,13 @@ def main():
     )
 
     parser.add_argument("--outdir", metavar="DIR", default=".", help="Output directory (default: current dir)")
+    parser.add_argument(
+        "--feed-scope",
+        choices=("auto", FEED_SCOPE_COMPLETE, FEED_SCOPE_DELTA),
+        default="auto",
+        help="Override the feed_scope written to _meta for --local "
+             "(default: auto, derived from the PFA type attribute)",
+    )
 
     args = parser.parse_args()
 

@@ -2,10 +2,15 @@ import json
 import os
 from pathlib import Path
 
-from dj_sanctions_analysis.config import CHILD_TABLES
+from dj_sanctions_analysis.config import CHILD_TABLES, FEED_SCOPES
 
 
-def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path, feed_scope="complete"):
+def merge_jsonl_with_deltas(tmp_dir, delta_list, out_path, *, feed_scope):
+    if feed_scope not in FEED_SCOPES:
+        raise ValueError(
+            "feed_scope must be one of %s, got %r" % (", ".join(FEED_SCOPES), feed_scope)
+        )
+
     tmp_dir = Path(tmp_dir)
     out_path = Path(out_path)
 

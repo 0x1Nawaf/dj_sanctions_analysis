@@ -32,6 +32,14 @@ Output is always `sanctions_seeder.json` in the output directory.
 
 **Important:** `_meta.feed_scope` tells the Go seeder how to treat the file. `--full` emits `complete`, meaning the JSON is the whole universe of records and anything missing from it has genuinely left the feed. `--daily` and `--today` emit `delta_only`, which makes the seeder apply the adds/changes/deletes in the file without inactivating everything absent from it.
 
+`complete` is the only value that lets the seeder inactivate records, so it is never taken on trust:
+
+- The scope is derived from the `type` attribute on the XML's `PFA` root element, not from the filename or the CLI flag. Only a positively identified full snapshot yields `complete`; unknown and missing types fall back to `delta_only`.
+- If a run is asked for `complete` but the base file's `PFA type` says otherwise, the scope is downgraded to `delta_only` and a warning is printed.
+- `--local` derives the scope the same way. Use `--feed-scope complete|delta_only` to override it, which prints a warning when it disagrees with the file.
+
+A JSON with no `feed_scope` at all — anything produced before this field existed — is treated as partial by the seeder and will never inactivate records.
+
 ## How it works
 
 1. Connects to `https://djrcfeed.dowjones.com/xml/` with Basic auth
